@@ -8,7 +8,7 @@ ratatui = "0.30"
 crossterm = "0.29"
 arboard = { version = "3.6", features = ["wayland-data-control"] }
 walkdir = "2"
-dirs = "6"
+dirs = "7"
 anyhow = "1"
 rand = "0.9"
 zxcvbn = "3"
