@@ -1,0 +1,16 @@
+# Copy to ~/.config/passtui/themes/my-theme.toml, then select name = "my-theme".
+# Omitted colors inherit from this built-in preset.
+base = "catppuccin-mocha"
+
+[colors]
+primary = "#7DD3FC"
+secondary = "#C4B5FD"
+accent = "#FBBF24"
+text = "#E5E7EB"
+muted = "#94A3B8"
+background = "#101827"
+selection_bg = "#7DD3FC"
+selection_fg = "#101827"
+success = "#86EFAC"
+warning = "#FBBF24"
+error = "#FDA4AF"
