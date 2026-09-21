@@ -10,7 +10,7 @@ arboard = { version = "3.6", features = ["wayland-data-control"] }
 walkdir = "2"
 dirs = "6"
 anyhow = "1"
-rand = "0.9"
+rand = "0.10"
 zxcvbn = "3"
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
