@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 
 const LOWERCASE: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 const UPPERCASE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
