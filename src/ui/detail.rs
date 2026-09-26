@@ -112,7 +112,7 @@ fn build_placeholder<'a>(app: &App) -> Vec<Line<'a>> {
 
     if !app.pass_available {
         lines.push(Line::from(Span::styled(
-            "  ⚠  `pass` is not installed",
+            "  `pass` is not installed",
             theme::error_border(),
         )));
         lines.push(Line::from(""));
@@ -139,7 +139,7 @@ fn build_placeholder<'a>(app: &App) -> Vec<Line<'a>> {
         )));
     } else if !app.is_initialized {
         lines.push(Line::from(Span::styled(
-            "  ⚠  Password Store Not Initialized",
+            "  Password Store Not Initialized",
             theme::popup_border(),
         )));
         lines.push(Line::from(""));

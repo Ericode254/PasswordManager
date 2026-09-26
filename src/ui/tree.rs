@@ -10,9 +10,9 @@ use ratatui::widgets::{Block, BorderType, List, ListItem};
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::bordered()
         .title(if app.favorites_only {
-            " ★ Favorites · F show all "
+            " Favorites · F show all "
         } else {
-            " 🔐 Password Store "
+            " Password Store "
         })
         .title_style(theme::title())
         .border_type(BorderType::Rounded)
@@ -23,24 +23,24 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .map(|entry| {
             let indent = "  ".repeat(entry.depth);
-            let (icon, style) = if entry.is_dir {
+            let (prefix, style) = if entry.is_dir {
                 let arrow = if entry.expanded { "▼" } else { "▶" };
-                (format!("{indent}{arrow} 📁 "), theme::folder())
+                (format!("{indent}{arrow} "), theme::folder())
             } else {
                 (
                     format!(
-                        "{indent}   {} ",
+                        "{indent}{} ",
                         if app.favorites.contains(&entry.path) {
                             "★"
                         } else {
-                            "🔑"
+                            " "
                         }
                     ),
                     theme::entry(),
                 )
             };
 
-            let mut spans = vec![Span::styled(icon, style)];
+            let mut spans = vec![Span::styled(prefix, style)];
             let label = if app.search_query.is_empty() && !app.favorites_only {
                 &entry.name
             } else {

@@ -8,7 +8,7 @@ use ratatui::widgets::Paragraph;
 /// Renders the bottom status / keybinding hint bar.
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let line = if let Some(loading) = &app.loading {
-        Line::from(format!(" ⏳ {}", loading.message))
+        Line::from(format!(" {}", loading.message))
     } else if app.input_mode == InputMode::Search {
         Line::from(vec![
             Span::styled(" /", theme::search_highlight()),
@@ -19,7 +19,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  [Enter] confirm  [Esc] cancel", theme::password_hidden()),
         ])
     } else if let Some((msg, _)) = &app.status_message {
-        Line::from(Span::styled(format!(" ℹ  {msg}"), theme::value()))
+        Line::from(Span::styled(format!(" {msg}"), theme::value()))
     } else if let Some(deadline) = app
         .clipboard_expires
         .filter(|deadline| *deadline > std::time::Instant::now())
@@ -70,7 +70,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 theme::value()
             };
 
-            spans.push(Span::styled(format!(" 🌿 {branch}{sync_info} "), git_style));
+            spans.push(Span::styled(
+                format!(" Git: {branch}{sync_info} "),
+                git_style,
+            ));
             spans.push(Span::styled("│", theme::password_hidden()));
         }
 

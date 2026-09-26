@@ -355,7 +355,7 @@ fn render_confirm(frame: &mut Frame, message: &str) {
     ];
 
     let block = Block::bordered()
-        .title(" ⚠  Confirm ")
+        .title(" Confirm ")
         .title_style(theme::error_border())
         .border_type(BorderType::Rounded)
         .border_style(theme::error_border());
@@ -571,7 +571,7 @@ fn render_generator(frame: &mut Frame, view: GeneratorView<'_>) {
     ];
 
     let block = Block::bordered()
-        .title(" 🔐 Password Generator ")
+        .title(" Password Generator ")
         .title_style(theme::title())
         .border_type(BorderType::Rounded)
         .border_style(theme::popup_border());
@@ -673,7 +673,7 @@ fn render_init_store(frame: &mut Frame, mode: &crate::app::InitMode) {
             content.push(Line::from(""));
 
             let block = Block::bordered()
-                .title(" 🔑 Initialize Password Store ")
+                .title(" Initialize Password Store ")
                 .title_style(theme::title())
                 .border_type(BorderType::Rounded)
                 .border_style(theme::popup_border());
@@ -738,7 +738,7 @@ fn render_init_store(frame: &mut Frame, mode: &crate::app::InitMode) {
             ];
 
             let block = Block::bordered()
-                .title(" 🔑 Generate GPG Key & Init Store ")
+                .title(" Generate GPG Key & Init Store ")
                 .title_style(theme::title())
                 .border_type(BorderType::Rounded)
                 .border_style(theme::popup_border());
@@ -872,7 +872,7 @@ fn render_git_sync(frame: &mut Frame, app: &App) {
     }
 
     let block = Block::bordered()
-        .title(" 🌿 Git Synchronization ")
+        .title(" Git Synchronization ")
         .title_style(theme::title())
         .border_type(BorderType::Rounded)
         .border_style(theme::popup_border());
@@ -909,7 +909,7 @@ fn render_github_repo(frame: &mut Frame, name: &str) {
     ];
 
     let block = Block::bordered()
-        .title(" ◉ Create GitHub Repository ")
+        .title(" Create GitHub Repository ")
         .title_style(theme::title())
         .border_type(BorderType::Rounded)
         .border_style(theme::popup_border());
@@ -938,7 +938,7 @@ fn render_set_remote(frame: &mut Frame, url: &str) {
     ];
 
     let block = Block::bordered()
-        .title(" 🔗 Configure Git Remote ")
+        .title(" Configure Git Remote ")
         .title_style(theme::title())
         .border_type(BorderType::Rounded)
         .border_style(theme::popup_border());
