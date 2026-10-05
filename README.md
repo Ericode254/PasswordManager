@@ -13,7 +13,33 @@ cargo build --release
 ./target/release/passtui --pick
 ```
 
-PassTUI honors `PASSWORD_STORE_DIR`. On first use, press `i` to select or create
+On first launch, PassTUI asks you to create and confirm a **master password**.
+Use at least **15 characters** and a strong, unpredictable password; common or
+repetitive passwords are rejected. Six or more randomly chosen words work well.
+Input is masked, and you can paste a password. Press Esc to exit without opening
+the store. Every later launch, including `--pick`, requires this password before
+showing entries. Existing users also complete this setup once after upgrading.
+
+To generate a master password during setup, press **Ctrl+G**. PassTUI shows a
+random six-word passphrase: record it somewhere safe, then press **Enter** to use
+it and retype it in the confirmation field. **Ctrl+G** generates another candidate;
+**Esc** returns to your previous draft. The generated phrase is visible only in
+the preview; setup fields remain masked. Generation is available only during
+first-time setup, not on the unlock screen.
+
+Only a randomly salted Argon2id hash is saved, in
+`~/.config/passtui/master-password` (under `$XDG_CONFIG_HOME` when set), with
+owner-only file permissions on Unix. It is shared across stores opened with that
+configuration directory. Incorrect attempts incur a delay. An unreadable or
+invalid record prevents access instead of silently starting setup again.
+
+This password controls access through PassTUI. Vault encryption still uses GPG,
+which may separately ask for your key passphrase. Browserpass and the `pass` CLI
+continue to use GPG independently. Someone who can modify your local configuration
+can remove this application gate; it does not replace GPG or your desktop lock.
+Keep the master password safe: there is no in-app password recovery.
+
+PassTUI honors `PASSWORD_STORE_DIR`. After master-password setup, press `i` to select or create
 a GPG key and initialize a store, then `a` to add an entry. New-key creation uses
 GnuPG’s pinentry for a passphrase; a desktop pinentry must be available. See the
 [GnuPG key-generation documentation](https://gnupg.org/documentation/manuals/gnupg/OpenPGP-Key-Management.html). Back up your GPG
@@ -229,7 +255,7 @@ the browser after installing the extension.
 | Enter | Finish search, open entry, or submit a form |
 | `y` | Copy selected password |
 | `p` | Reveal password for 15 seconds, or hide it immediately |
-| Ctrl+L | Clear the session and show the privacy lock screen, including inside forms |
+| Ctrl+L | Clear the session and lock with the master password, including inside forms |
 | `t` | Show a TOTP authentication code; `y` copies, `r` refreshes |
 | `R` | Manage the selected website's recovery codes |
 | Esc | Close details, clear a filter, or cancel a dialog |
@@ -326,16 +352,16 @@ discarded too. Owned secret buffers use `zeroize` when dropped. This is best-eff
 memory cleanup, not a guarantee that terminal buffers, operating-system buffers,
 or every temporary copy have been erased.
 
-The privacy screen hides entry names and ignores pasted text. Press **Enter** to
-resume browsing or **q** to quit. An already-running operation is allowed to finish;
+The lock screen hides entry names and ignores pasted text. Press **Enter** to
+enter your master password and resume browsing, or **q** to quit. An already-running operation is allowed to finish;
 resuming waits for it, its decrypted result is discarded, and late clipboard copies
 are cancelled. A save already in progress can still complete. The refreshed store
 shows its outcome after resuming.
 
-This is a **PassTUI privacy lock, not a new authentication boundary**. It does not
-lock the desktop, lock Browserpass, or revoke GPG's shared cached credentials.
-Resuming does not require a new password; GPG decides whether the next decryption
-needs pinentry. See [GPG agent cache settings](https://www.gnupg.org/documentation/manuals/gnupg/Agent-Options.html)
+Unlocking requires the **PassTUI master password**, including in the quick picker.
+This does not lock the desktop, lock Browserpass, or revoke GPG's shared cached
+credentials. GPG decides whether the next decryption also needs pinentry.
+See [GPG agent cache settings](https://www.gnupg.org/documentation/manuals/gnupg/Agent-Options.html)
 if you also want to control how long GPG remembers an unlock.
 
 In your existing `~/.config/passtui/config.toml`, add this to `[behavior]`:
@@ -515,10 +541,15 @@ cargo test --offline
 cargo clippy --offline --all-targets -- -D warnings
 cargo build --offline
 python3 scripts/smoke-test.py
+python3 scripts/auth-smoke-test.py
 python3 scripts/theme-smoke-test.py
 python3 scripts/security-smoke-test.py
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
+
+The authentication smoke test checks first-time setup, cancellation, password generation
+and regeneration, weak passwords, confirmation mismatch, hidden input, persisted hashes, incorrect passwords, startup
+and session unlocking in both interfaces, and denial of corrupt credential records.
 
 The isolated terminal smoke test exercises add, edit, multiline paste, favorites
 shared with the picker, rename/move, search, deletion, and history restoration
@@ -541,7 +572,7 @@ authenticator service or desktop clipboard.
 
 The workflows in `.github/workflows/` provide:
 
-- **CI:** formatting, Clippy, Rust and Python tests, and all three terminal smoke
+- **CI:** formatting, Clippy, Rust and Python tests, and all four terminal smoke
   tests on pull requests and pushes to `main`. The runner uses stable Rust and
   Python 3.11; Cargo builds and tests use `--locked`.
 - **Dependency security:** `cargo audit` checks `Cargo.lock` on pull requests,

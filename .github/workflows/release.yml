@@ -54,6 +54,7 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_*.py'
           cargo build --locked
           python3 scripts/smoke-test.py
+          python3 scripts/auth-smoke-test.py
           python3 scripts/theme-smoke-test.py
           python3 scripts/security-smoke-test.py
       - name: Build release binary

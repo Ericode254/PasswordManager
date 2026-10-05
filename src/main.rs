@@ -1,4 +1,5 @@
 mod app;
+mod auth;
 mod clipboard;
 mod config;
 mod editor;
@@ -86,9 +87,22 @@ fn install_panic_hook() {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
+    let mut config = config::Config::load();
+    ui::theme::configure(&mut config);
+    let mut auth = auth::Auth::load()?;
+    if !auth.prompt(terminal)? {
+        return Ok(());
+    }
     let mut app = App::new();
 
     loop {
+        if app.unlock_requested {
+            app.unlock_requested = false;
+            if !auth.prompt(terminal)? {
+                return Ok(());
+            }
+            app.resume_authenticated();
+        }
         if let Some(plan) = app.install_request.take() {
             event::disable_paste();
             ratatui::restore();

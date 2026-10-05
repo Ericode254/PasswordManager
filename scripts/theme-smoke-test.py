@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import termios
 import time
+from auth_fixture import authenticate
 
 PROJECT = Path(__file__).resolve().parents[1]
 BINARY = PROJECT / 'target/debug/passtui'
@@ -60,6 +61,8 @@ with tempfile.TemporaryDirectory(prefix='passtui-theme-smoke-') as temporary:
                 output = capture(master)
                 assert process.poll() is None, 'UI exited unexpectedly'
                 assert expected in output, f'Wrong background: picker={picker}, {setting}'
+                authenticate(master, lambda seconds: capture(master, seconds),
+                             setup=not (config / 'master-password').exists())
                 if not picker and 'missing' not in setting:
                     os.write(master, b'a')
                     assert expected in capture(master), 'Dialog did not retain custom background'

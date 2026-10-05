@@ -4,6 +4,7 @@ fn app() -> App {
     App {
         running: true,
         locked: false,
+        unlock_requested: false,
         install_request: None,
         lock_outcome: None,
         last_activity: Instant::now(),
@@ -243,6 +244,9 @@ fn idle_lock_clears_drafts_details_and_undo_without_accepting_paste() {
     press(&mut app, KeyCode::Char('a'));
     assert!(app.locked);
     press(&mut app, KeyCode::Enter);
+    assert!(app.locked);
+    assert!(app.unlock_requested);
+    app.resume_authenticated();
     assert!(!app.locked);
     assert!(!app.clipboard_session.revoked());
     app.is_initialized = true; // The fixture deliberately has no real store.
@@ -276,6 +280,9 @@ fn manual_lock_during_worker_discards_late_decryption_and_blocks_resume_until_do
     assert!(app.detail.is_none());
     assert!(matches!(app.popup, ActivePopup::None));
     press(&mut app, KeyCode::Enter);
+    assert!(app.locked);
+    assert!(app.unlock_requested);
+    app.resume_authenticated();
     assert!(!app.locked);
 }
 

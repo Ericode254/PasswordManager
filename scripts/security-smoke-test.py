@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import termios
 import time
+from auth_fixture import authenticate
 
 BINARY = Path(__file__).resolve().parents[1] / 'target/debug/passtui'
 FAKE_PASS = '''#!/usr/bin/env python3
@@ -122,6 +123,7 @@ with open(os.environ['INSTALL_LOG'], 'a') as log: log.write('installed\\n')
     master, process = launch()
     try:
         capture()
+        authenticate(master, capture, setup=True)
         send('/login\r')
         details = send('\r')
         assert 'GEZDGNBV' not in details and 'hidden-password' not in details
@@ -137,6 +139,8 @@ with open(os.environ['INSTALL_LOG'], 'a') as log: log.write('installed\\n')
         assert 'Sessioncleared' in send('\x0c').replace(' ', '')
         assert '12345678' not in send('t')
         send('\r')
+        send('\x15')  # Clear any earlier input; the auth prompt never opens the store.
+        authenticate(master, capture)
         send('/hotp\r')
         (root / 'called').unlink()
         assert 'OnlyTOTP' in send('t', 0.6).replace(' ', '')
@@ -148,6 +152,7 @@ with open(os.environ['INSTALL_LOG'], 'a') as log: log.write('installed\\n')
         send('\r', 0.1)  # Cannot resume until pending decryption has completed.
         assert 'late-secret' not in capture(1.0)
         send('\r')
+        authenticate(master, capture)
         close('q')
     finally:
         if process.poll() is None: process.kill(); process.wait(); os.close(master)
@@ -156,6 +161,7 @@ with open(os.environ['INSTALL_LOG'], 'a') as log: log.write('installed\\n')
         master, process = launch(picker, timeout=1)
         try:
             capture(0.2)
+            authenticate(master, capture)
             output = send('search' if picker else 'adraft\tdraft-password', 0.2)
             deadline = time.monotonic() + 8
             while 'Sessioncleared' not in output.replace(' ', '') and time.monotonic() < deadline:
@@ -163,6 +169,7 @@ with open(os.environ['INSTALL_LOG'], 'a') as log: log.write('installed\\n')
             assert 'Sessioncleared' in output.replace(' ', ''), output
             assert 'draft-password' not in output
             send('\r', 0.1)
+            authenticate(master, capture)
             close('\x1b' if picker else 'q')
         finally:
             if process.poll() is None: process.kill(); process.wait(); os.close(master)

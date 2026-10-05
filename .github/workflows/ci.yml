@@ -44,6 +44,8 @@ jobs:
         run: cargo build --locked
       - name: Test terminal workflows
         run: python3 scripts/smoke-test.py
+      - name: Test master-password authentication
+        run: python3 scripts/auth-smoke-test.py
       - name: Test custom themes
         run: python3 scripts/theme-smoke-test.py
       - name: Test privacy and OTP workflows

@@ -15,6 +15,10 @@ use std::time::Duration;
 pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
     let mut config = Config::load();
     theme::configure(&mut config);
+    let mut auth = crate::auth::Auth::load()?;
+    if !auth.prompt(terminal)? {
+        return Ok(());
+    }
     let store_dir = store::get_store_dir();
     let tree = store::scan_store(&store_dir);
     let mut entries = Vec::new();
@@ -121,6 +125,9 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(()),
                 KeyCode::Enter if pending.is_none() => {
+                    if !auth.prompt(terminal)? {
+                        return Ok(());
+                    }
                     locked = false;
                     session = Default::default();
                     last_activity = std::time::Instant::now();

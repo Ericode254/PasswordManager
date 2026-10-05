@@ -11,6 +11,7 @@ import tempfile
 import termios
 import time
 import tomllib
+from auth_fixture import authenticate
 
 BINARY = Path(__file__).resolve().parents[1] / "target/debug/passtui"
 FAKE_PASS = r'''#!/usr/bin/env python3
@@ -89,6 +90,7 @@ with tempfile.TemporaryDirectory(prefix='passtui-smoke-') as temporary:
         settle()
     try:
         settle()
+        authenticate(master, settle, setup=True)
         send('agithub\tg-test-secret\talice\thttps://example.com\t\x1b[200~important note\nsecond line\x1b[201~\r')
         original = store / 'github.gpg'
         assert original.read_text() == 'g-test-secret\nusername: alice\nurl: https://example.com\nimportant note\nsecond line'
@@ -163,6 +165,7 @@ with tempfile.TemporaryDirectory(prefix='passtui-smoke-') as temporary:
         process = subprocess.Popen([str(BINARY), '--pick'], stdin=slave, stdout=slave, stderr=slave, env=environment)
         os.close(slave)
         settle()
+        authenticate(master, settle)
         send('\x1b[200~github\x1b[201~')
         send('\x06')  # Ctrl+f toggles the persisted favorite in the picker.
         assert favorites() == []

@@ -151,6 +151,7 @@ enum BackgroundResult {
 pub struct App {
     pub running: bool,
     pub locked: bool,
+    pub unlock_requested: bool,
     pub install_request: Option<crate::otp_setup::Plan>,
     pub lock_outcome: Option<String>,
     last_activity: Instant,
@@ -220,6 +221,7 @@ impl App {
         Self {
             running: true,
             locked: false,
+            unlock_requested: false,
             install_request: None,
             lock_outcome: None,
             last_activity: Instant::now(),
@@ -377,6 +379,7 @@ impl App {
 
     fn lock_session(&mut self) {
         self.locked = true;
+        self.unlock_requested = false;
         self.install_request = None;
         self.clipboard_session.revoke();
         self.clear_detail();
@@ -394,6 +397,21 @@ impl App {
         }
         self.generator_draft = None;
         self.clipboard_expires = None;
+    }
+
+    /// Called only after the master-password prompt succeeds.
+    pub fn resume_authenticated(&mut self) {
+        if self.pending_action.is_some() {
+            return;
+        }
+        self.locked = false;
+        self.unlock_requested = false;
+        self.last_activity = Instant::now();
+        self.clipboard_session = Default::default();
+        self.refresh_tree();
+        if let Some(outcome) = self.lock_outcome.take() {
+            self.set_status(outcome);
+        }
     }
 
     pub fn selected_entry(&self) -> Option<&FlatEntry> {
@@ -1177,13 +1195,7 @@ impl App {
             match key.code {
                 KeyCode::Char('q') if self.pending_action.is_none() => self.running = false,
                 KeyCode::Enter if self.pending_action.is_none() => {
-                    self.locked = false;
-                    self.last_activity = Instant::now();
-                    self.clipboard_session = Default::default();
-                    self.refresh_tree();
-                    if let Some(outcome) = self.lock_outcome.take() {
-                        self.set_status(outcome);
-                    }
+                    self.unlock_requested = true;
                 }
                 _ => (),
             }

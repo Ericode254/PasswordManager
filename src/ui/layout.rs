@@ -55,14 +55,14 @@ pub fn render_locked(frame: &mut Frame, pending: bool, outcome: Option<&str>) {
         if pending {
             "Waiting for the background action to finish…"
         } else {
-            "Enter resumes browsing · q quits"
+            "Enter unlocks with your master password · q quits"
         },
         outcome.unwrap_or("")
     );
     frame.render_widget(
         Paragraph::new(message)
             .wrap(Wrap { trim: false })
-            .block(Block::bordered().title(" PassTUI · Privacy lock ")),
+            .block(Block::bordered().title(" PassTUI · Locked ")),
         frame.area(),
     );
 }
