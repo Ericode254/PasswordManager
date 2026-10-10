@@ -20,6 +20,14 @@ use crate::{
 
 const MAX_BYTES: usize = 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PromptMode {
+    Setup,
+    Unlock,
+    VerifyCurrent,
+    Replace,
+}
+
 /// Local application access control. GPG remains responsible for vault encryption.
 pub struct Auth {
     path: PathBuf,
@@ -57,6 +65,10 @@ impl Auth {
     }
 
     fn enroll(&mut self, password: &str, confirmation: &str) -> Result<()> {
+        self.save_password(password, confirmation, false)
+    }
+
+    fn save_password(&mut self, password: &str, confirmation: &str, replace: bool) -> Result<()> {
         validate_password(password)?;
         if password != confirmation {
             bail!("Passwords do not match. Re-enter both fields.");
@@ -67,24 +79,67 @@ impl Auth {
             .hash_password(password.as_bytes(), &salt)
             .map_err(|_| anyhow::anyhow!("Cannot hash master password"))?
             .to_string();
-        fs::create_dir_all(self.path.parent().context("Invalid authentication path")?)?;
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+        let directory = self.path.parent().context("Invalid authentication path")?;
+        fs::create_dir_all(directory)?;
+        let mut lock_options = private_file_options();
+        lock_options.create(true).truncate(false);
+        let lock = lock_options.open(directory.join(".master-password.lock"))?;
+        lock.try_lock()
+            .map_err(|_| anyhow::anyhow!("Another password update is in progress. Try again."))?;
+        if replace {
+            let current = Self::load_from(self.path.clone())?;
+            if self.hash.is_none() || current.hash != self.hash {
+                bail!(
+                    "Master password changed elsewhere. Cancel and verify the current password again."
+                );
+            }
         }
-        // Never overwrite a credential created by another running instance.
-        let mut file = options
-            .open(&self.path)
-            .context("Cannot create master-password record; close and reopen PassTUI to retry")?;
-        file.write_all(hash.as_bytes())
-            .context("Cannot save master-password record")?;
-        file.sync_all()
-            .context("Cannot persist master-password record")?;
+        let temporary = directory.join(format!(
+            ".master-password-{:016x}.tmp",
+            rand::random::<u64>()
+        ));
+        let mut file = private_file_options().create_new(true).open(&temporary)?;
+        let result = (|| -> Result<()> {
+            file.write_all(hash.as_bytes())
+                .context("Cannot save master-password record")?;
+            file.sync_all()
+                .context("Cannot persist master-password record")?;
+            if replace {
+                fs::rename(&temporary, &self.path)
+                    .context("Cannot replace master-password record")?;
+            } else {
+                // Publish a complete record without overwriting another enrollment.
+                fs::hard_link(&temporary, &self.path).context(
+                    "Cannot create master-password record; close and reopen PassTUI to retry",
+                )?;
+            }
+            Ok(())
+        })();
+        drop(file);
+        let _ = fs::remove_file(&temporary);
+        result?;
         self.hash = Some(hash);
         Ok(())
+    }
+
+    fn refresh(&mut self) -> Result<()> {
+        let current = Self::load_from(self.path.clone())?;
+        if self.hash.is_some() && current.hash.is_none() {
+            bail!("Master-password record is missing; access denied");
+        }
+        self.hash = current.hash;
+        Ok(())
+    }
+
+    pub fn change_password(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<bool> {
+        self.refresh()?;
+        if self.hash.is_none() {
+            bail!("Launch PassTUI to set a master password first.");
+        }
+        if !self.prompt_mode(terminal, PromptMode::VerifyCurrent)? {
+            return Ok(false);
+        }
+        self.prompt_mode(terminal, PromptMode::Replace)
     }
 
     fn verify(&self, password: &str) -> bool {
@@ -100,7 +155,21 @@ impl Auth {
 
     /// Returns false on cancellation. Never exposes store contents before success.
     pub fn prompt(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<bool> {
-        let setup = self.hash.is_none();
+        self.refresh()?;
+        let mode = if self.hash.is_none() {
+            PromptMode::Setup
+        } else {
+            PromptMode::Unlock
+        };
+        self.prompt_mode(terminal, mode)
+    }
+
+    fn prompt_mode(
+        &mut self,
+        terminal: &mut ratatui::DefaultTerminal,
+        mode: PromptMode,
+    ) -> Result<bool> {
+        let setup = matches!(mode, PromptMode::Setup | PromptMode::Replace);
         // Reserve the input limit so typing does not leave old allocations behind.
         let mut fields = [
             Zeroizing::new(String::with_capacity(MAX_BYTES)),
@@ -151,20 +220,26 @@ impl Auth {
                     return;
                 }
                 let mut lines = vec![
-                    if setup {
-                        "Welcome! Set a strong master password to protect access to PassTUI."
-                            .to_string()
-                    } else {
-                        "Enter your master password to unlock PassTUI.".to_string()
-                    },
+                    match mode {
+                        PromptMode::Setup => {
+                            "Welcome! Set a strong master password to protect access to PassTUI."
+                        }
+                        PromptMode::Unlock => "Enter your master password to unlock PassTUI.",
+                        PromptMode::VerifyCurrent => {
+                            "Enter your current master password before changing it."
+                        }
+                        PromptMode::Replace => "Choose and confirm a new master password.",
+                    }
+                    .to_string(),
                     String::new(),
                 ];
                 if setup {
                     lines.push(
-                        "Use at least 15 characters and a strong, unpredictable password.".into(),
+                        "Use at least 15 characters. Spaces and other whitespace are not allowed."
+                            .into(),
                     );
                     lines.push(
-                        "Tip: use six or more randomly chosen words. Avoid common phrases.".into(),
+                        "Tip: join six or more random words with hyphens, not spaces.".into(),
                     );
                     lines.push(String::new());
                     lines.push("Ctrl+G generates a strong six-word passphrase for you.".into());
@@ -194,10 +269,11 @@ impl Auth {
                 frame.render_widget(
                     Paragraph::new(lines.join("\n"))
                         .wrap(Wrap { trim: false })
-                        .block(Block::bordered().title(if setup {
-                            " Create master password "
-                        } else {
-                            " Unlock PassTUI "
+                        .block(Block::bordered().title(match mode {
+                            PromptMode::Setup => " Create master password ",
+                            PromptMode::Unlock => " Unlock PassTUI ",
+                            PromptMode::VerifyCurrent => " Verify current master password ",
+                            PromptMode::Replace => " Change master password ",
                         })),
                     panel,
                 );
@@ -266,12 +342,25 @@ impl Auth {
                             if fields[0] != fields[1] {
                                 message = "Passwords do not match. Re-enter both fields.".into();
                             } else {
-                                self.enroll(&fields[0], &fields[1])?;
+                                let result = if mode == PromptMode::Replace {
+                                    self.save_password(&fields[0], &fields[1], true)
+                                } else {
+                                    self.enroll(&fields[0], &fields[1])
+                                };
+                                match result {
+                                    Ok(()) => return Ok(true),
+                                    Err(error) => {
+                                        message = error.to_string();
+                                        continue;
+                                    }
+                                }
+                            }
+                        } else {
+                            // An already-open prompt must also notice password changes.
+                            self.refresh()?;
+                            if self.verify(&fields[0]) {
                                 return Ok(true);
                             }
-                        } else if self.verify(&fields[0]) {
-                            return Ok(true);
-                        } else {
                             message = "Incorrect master password. Try again.".into();
                             failures = failures.saturating_add(1);
                             retry_at = Instant::now()
@@ -321,7 +410,21 @@ fn generate_master_password() -> Zeroizing<String> {
     }
 }
 
+fn private_file_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+}
+
 fn validate_password(password: &str) -> Result<()> {
+    if password.chars().any(char::is_whitespace) {
+        bail!("Spaces and other whitespace are not allowed. Use hyphens between words.");
+    }
     if password.chars().count() < 15 {
         bail!("Use at least 15 characters.");
     }
@@ -373,6 +476,87 @@ mod tests {
             assert!(validate_password(password).is_err());
         }
         assert!(validate_password(STRONG).is_ok());
+    }
+
+    #[test]
+    fn rejects_whitespace_without_normalizing_passwords() {
+        for separator in [" ", "\t", "\n", "\u{a0}", "\u{2003}", "\u{202f}"] {
+            assert!(validate_password(&STRONG.replace('-', separator)).is_err());
+            assert!(validate_password(&format!("{separator}{STRONG}")).is_err());
+            assert!(validate_password(&format!("{STRONG}{separator}")).is_err());
+        }
+    }
+
+    #[test]
+    fn password_changes_preserve_existing_credentials_on_failure_and_refresh_other_sessions() {
+        const NEW: &str = "meteor-canvas-saffron-dolphin-velvet-bridge";
+        let directory =
+            std::env::temp_dir().join(format!("passtui-change-test-{}", rand::random::<u64>()));
+        let path = directory.join("master-password");
+        let mut auth = Auth::load_from(path.clone()).unwrap();
+        auth.enroll(STRONG, STRONG).unwrap();
+        let mut other_session = Auth::load_from(path.clone()).unwrap();
+        let original = fs::read_to_string(&path).unwrap();
+        assert!(auth.save_password("weak", "weak", true).is_err());
+        assert!(auth.save_password(NEW, "mismatch", true).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        let lock = private_file_options()
+            .open(directory.join(".master-password.lock"))
+            .unwrap();
+        lock.try_lock().unwrap();
+        assert!(auth.save_password(NEW, NEW, true).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        drop(lock);
+        auth.save_password(NEW, NEW, true).unwrap();
+        let updated = fs::read_to_string(&path).unwrap();
+        assert_ne!(original, updated);
+        assert!(auth.verify(NEW));
+        assert!(!auth.verify(STRONG));
+        assert!(other_session.save_password(STRONG, STRONG, true).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), updated);
+        other_session.refresh().unwrap();
+        assert!(other_session.verify(NEW));
+        assert!(!other_session.verify(STRONG));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        assert!(!fs::read_dir(&directory).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "tmp")
+        }));
+        fs::remove_file(&path).unwrap();
+        assert!(other_session.refresh().is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn existing_password_with_spaces_can_still_unlock_and_be_replaced() {
+        let directory =
+            std::env::temp_dir().join(format!("passtui-legacy-test-{}", rand::random::<u64>()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("master-password");
+        let legacy = STRONG.replace('-', " ");
+        let salt = SaltString::encode_b64(&rand::random::<[u8; 16]>()).unwrap();
+        let hash = Argon2::default()
+            .hash_password(legacy.as_bytes(), &salt)
+            .unwrap()
+            .to_string();
+        fs::write(&path, hash).unwrap();
+        let mut auth = Auth::load_from(path).unwrap();
+        assert!(auth.verify(&legacy));
+        assert!(!auth.verify(STRONG));
+        auth.save_password(STRONG, STRONG, true).unwrap();
+        assert!(auth.verify(STRONG));
+        assert!(!auth.verify(&legacy));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

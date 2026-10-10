@@ -18,10 +18,10 @@ BINARY = Path(__file__).resolve().parents[1] / 'target/debug/passtui'
 
 
 class Session:
-    def __init__(self, environment, picker=False):
+    def __init__(self, environment, picker=False, extra_args=()):
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
-        self.process = subprocess.Popen([str(BINARY), *(['--pick'] if picker else [])],
+        self.process = subprocess.Popen([str(BINARY), *(['--pick'] if picker else []), *extra_args],
                                         stdin=slave, stdout=slave, stderr=slave, env=environment)
         os.close(slave)
         self.output = b''
@@ -47,6 +47,9 @@ class Session:
     def password(self):
         return self.send('\x1b[200~' + PASSWORD + '\x1b[201~\r', 1.5)
 
+    def submit(self, password):
+        return self.send('\x1b[200~' + password + '\x1b[201~\r', 1.5)
+
     def generated_password(self):
         self.send('\x07')
         output = self.redraw()
@@ -68,7 +71,9 @@ class Session:
         while text.replace(' ', '') not in output.replace(' ', ''):
             assert time.monotonic() < deadline, repr(output)
             assert self.process.poll() is None, repr(output)
-            output += self.capture(0.1)
+            # Adjacent dialogs may reuse individual characters in ratatui's
+            # differential output. Request a full frame before matching text.
+            output += self.redraw()
         return output
 
     def close(self, keys='\x1b', expected=0):
@@ -103,6 +108,13 @@ with tempfile.TemporaryDirectory(prefix='passtui-auth-smoke-') as temporary:
 
     session = Session(environment)
     session.capture()
+    for text, paste in [(PASSWORD.replace('-', ' '), False),
+                        (PASSWORD.replace('-', '\u00a0'), True)]:
+        session.submit(text) if paste else session.send(text + '\r')
+        output = session.redraw()
+        assert 'Usehyphensbetweenwords' in output.replace(' ', ''), output
+        assert not record.exists()
+        session.send('\x15')
     output = session.send('short\r')
     assert 'atleast15' in output.replace(' ', ''), repr(output)
     assert not record.exists() and not backend_log.exists()
@@ -146,6 +158,66 @@ with tempfile.TemporaryDirectory(prefix='passtui-auth-smoke-') as temporary:
         assert 'private-entry-name' in output
         session.close('\x1b' if picker else 'q')
 
+    original_hash = record.read_text()
+    session = Session(environment, extra_args=['--change-master-password'])
+    session.expect(session.capture(), 'Verify current master password')
+    session.expect(session.submit('wrong'), 'Incorrect master password')
+    session.close()
+    assert record.read_text() == original_hash
+
+    session = Session(environment, extra_args=['--change-master-password'])
+    session.capture()
+    session.expect(session.password(), 'Change master password')
+    session.submit(PASSWORD.replace('-', ' '))
+    assert 'Usehyphensbetweenwords' in session.redraw().replace(' ', '')
+    session.send('\x15')
+    session.submit('weak')
+    assert 'atleast15' in session.redraw().replace(' ', '')
+    session.send('\x15')
+    session.password()
+    session.submit('mismatch')
+    assert 'donotmatch' in session.redraw().replace(' ', '')
+    session.close()
+    assert record.read_text() == original_hash, 'Cancellation must preserve the old password'
+
+    # Keep a second unlock prompt open while changing the password in the main app.
+    observer = Session(environment, picker=True)
+    observer.capture()
+    session = Session(environment)
+    session.capture()
+    session.expect(session.password(), 'private-entry-name')
+    session.expect(session.send('\x0b'), 'Verify current master password')
+    session.expect(session.password(), 'Change master password')
+    replacement = session.generated_password()
+    session.send('\r')
+    session.expect(session.submit(replacement), 'Master password changed')
+    assert record.read_text() != original_hash and replacement not in record.read_text()
+    session.send('\x0c')
+    session.send('\r')
+    session.expect(session.password(), 'Incorrect master password')
+    session.capture(2.1)
+    session.expect(session.submit(replacement), 'private-entry-name')
+    session.close('q')
+    observer.expect(observer.password(), 'Incorrect master password')
+    observer.capture(2.1)
+    observer.expect(observer.submit(replacement), 'private-entry-name')
+    assert replacement.encode() not in observer.output
+    observer.close()
+
+    session = Session(environment, extra_args=['--change-master-password'])
+    session.capture()
+    session.expect(session.submit(replacement), 'Change master password')
+    session.password()
+    output = session.password()
+    session.process.wait(timeout=10)
+    output += session.capture(0.1)
+    assert 'Masterpasswordchanged' in output.replace(' ', ''), output
+    session.close()
+    session = Session(environment)
+    session.capture()
+    session.expect(session.password(), 'private-entry-name')
+    session.close('q')
+
     record.write_text('corrupted authentication record')
     backend_log.unlink(missing_ok=True)
     session = Session(environment)
@@ -186,4 +258,4 @@ with tempfile.TemporaryDirectory(prefix='passtui-auth-smoke-') as temporary:
         assert phrase.encode() not in session.output, 'Unlock input must remain masked'
         session.close('\x1b' if picker else 'q')
 
-    print('PASS: setup/cancel, generation/regeneration/confirmation and persistence, masked input, wrong-password denial, TUI/picker startup and relock, corrupt-record denial')
+    print('PASS: whitespace rejection, password change/verification/cancellation and concurrent sessions, generation/confirmation, masked input, TUI/picker unlock/relock, corrupt-record denial')

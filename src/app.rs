@@ -152,6 +152,7 @@ pub struct App {
     pub running: bool,
     pub locked: bool,
     pub unlock_requested: bool,
+    pub change_password_requested: bool,
     pub install_request: Option<crate::otp_setup::Plan>,
     pub lock_outcome: Option<String>,
     last_activity: Instant,
@@ -222,6 +223,7 @@ impl App {
             running: true,
             locked: false,
             unlock_requested: false,
+            change_password_requested: false,
             install_request: None,
             lock_outcome: None,
             last_activity: Instant::now(),
@@ -380,6 +382,7 @@ impl App {
     fn lock_session(&mut self) {
         self.locked = true;
         self.unlock_requested = false;
+        self.change_password_requested = false;
         self.install_request = None;
         self.clipboard_session.revoke();
         self.clear_detail();
@@ -1224,6 +1227,13 @@ impl App {
                     KeyCode::Char('q') => self.running = false,
                     _ => {}
                 }
+            }
+            return;
+        }
+        if key.code == KeyCode::Char('k') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if self.input_mode == InputMode::Normal && matches!(self.popup, ActivePopup::None) {
+                self.lock_session();
+                self.change_password_requested = true;
             }
             return;
         }

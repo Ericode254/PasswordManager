@@ -153,7 +153,7 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 // ── Help popup ─────────────────────────────────────────
 
 fn render_help(frame: &mut Frame, app: &App) {
-    let area = centered_rect(76, 23, frame.area());
+    let area = centered_rect(76, 24, frame.area());
     clear_popup(frame, area);
     let lines = vec![
         "j/k, ↑/↓       Navigate entries".to_string(),
@@ -166,6 +166,7 @@ fn render_help(frame: &mut Frame, app: &App) {
         "p              Reveal password for 15 seconds".into(),
         "t / R          OTP / recovery codes".into(),
         "Ctrl+L         Clear session and discard drafts".into(),
+        "Ctrl+K         Change master password (from main screen)".into(),
         "u / w          Copy username / URL from open entry".into(),
         "a / e / r      Add / edit / rename entry".into(),
         "d              Delete (explicit y confirms)".into(),

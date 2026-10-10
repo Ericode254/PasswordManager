@@ -46,6 +46,26 @@ fn main() -> anyhow::Result<()> {
                 ratatui::restore();
                 return result;
             }
+            "--change-master-password" => {
+                install_panic_hook();
+                let mut terminal = ratatui::init();
+                let _paste = event::PasteGuard::enable()?;
+                let result = (|| -> anyhow::Result<bool> {
+                    let mut config = config::Config::load();
+                    ui::theme::configure(&mut config);
+                    auth::Auth::load()?.change_password(&mut terminal)
+                })();
+                ratatui::restore();
+                println!(
+                    "{}",
+                    if result? {
+                        "Master password changed."
+                    } else {
+                        "Password change cancelled."
+                    }
+                );
+                return Ok(());
+            }
             "-h" | "--help" => {
                 println!("PassTUI — A lazygit-style terminal UI for `pass`\n");
                 println!("USAGE:");
@@ -54,6 +74,7 @@ fn main() -> anyhow::Result<()> {
                 println!("    -h, --help       Print help information");
                 println!("    -V, --version    Print version information");
                 println!("    --pick           Pick a password and copy it to the clipboard");
+                println!("    --change-master-password    Change the PassTUI master password");
                 println!(
                     "    --install-otp    Install OTP support with the native package manager"
                 );
@@ -96,6 +117,21 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
     let mut app = App::new();
 
     loop {
+        if app.change_password_requested {
+            app.change_password_requested = false;
+            let result = auth.change_password(terminal);
+            app.resume_authenticated();
+            match result {
+                Ok(true) => app.set_status("Master password changed."),
+                Ok(false) => app.set_status("Password change cancelled."),
+                Err(error) => {
+                    app.popup = app::ActivePopup::Notification {
+                        message: error.to_string(),
+                        is_error: true,
+                    }
+                }
+            }
+        }
         if app.unlock_requested {
             app.unlock_requested = false;
             if !auth.prompt(terminal)? {

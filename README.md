@@ -14,8 +14,9 @@ cargo build --release
 ```
 
 On first launch, PassTUI asks you to create and confirm a **master password**.
-Use at least **15 characters** and a strong, unpredictable password; common or
-repetitive passwords are rejected. Six or more randomly chosen words work well.
+Use at least **15 characters**, with **no spaces or other whitespace**, and a
+strong, unpredictable password; common or repetitive passwords are rejected.
+Join six or more randomly chosen words with hyphens instead of spaces.
 Input is masked, and you can paste a password. Press Esc to exit without opening
 the store. Every later launch, including `--pick`, requires this password before
 showing entries. Existing users also complete this setup once after upgrading.
@@ -24,8 +25,24 @@ To generate a master password during setup, press **Ctrl+G**. PassTUI shows a
 random six-word passphrase: record it somewhere safe, then press **Enter** to use
 it and retype it in the confirmation field. **Ctrl+G** generates another candidate;
 **Esc** returns to your previous draft. The generated phrase is visible only in
-the preview; setup fields remain masked. Generation is available only during
-first-time setup, not on the unlock screen.
+the preview; setup fields remain masked. Generation is available during first-time
+setup and when choosing a replacement password, not on the unlock screen.
+
+To change your master password, press **Ctrl+K** on the main browsing screen
+(close any form or popup first), or run:
+
+```sh
+./target/release/passtui --change-master-password
+```
+
+Enter your **current password**, then enter and confirm a strong new password
+without whitespace, or use **Ctrl+G** to generate one. Esc cancels without changing
+the saved password. The old password is replaced only after the new record has
+been written successfully. Other open sessions use the new password the next
+time they unlock. Existing passwords containing spaces still work for unlocking
+and verifying the current password; the whitespace rule applies to newly saved
+passwords. This changes only the PassTUI master password, not your GPG passphrase
+or saved website passwords.
 
 Only a randomly salted Argon2id hash is saved, in
 `~/.config/passtui/master-password` (under `$XDG_CONFIG_HOME` when set), with
@@ -256,6 +273,7 @@ the browser after installing the extension.
 | `y` | Copy selected password |
 | `p` | Reveal password for 15 seconds, or hide it immediately |
 | Ctrl+L | Clear the session and lock with the master password, including inside forms |
+| Ctrl+K | Change the master password from the main browsing screen |
 | `t` | Show a TOTP authentication code; `y` copies, `r` refreshes |
 | `R` | Manage the selected website's recovery codes |
 | Esc | Close details, clear a filter, or cancel a dialog |
@@ -547,7 +565,8 @@ python3 scripts/security-smoke-test.py
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
-The authentication smoke test checks first-time setup, cancellation, password generation
+The authentication smoke test checks whitespace rejection, verified password changes,
+cancellation, concurrent sessions, first-time setup, password generation
 and regeneration, weak passwords, confirmation mismatch, hidden input, persisted hashes, incorrect passwords, startup
 and session unlocking in both interfaces, and denial of corrupt credential records.
 

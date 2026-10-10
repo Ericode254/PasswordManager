@@ -5,6 +5,7 @@ fn app() -> App {
         running: true,
         locked: false,
         unlock_requested: false,
+        change_password_requested: false,
         install_request: None,
         lock_outcome: None,
         last_activity: Instant::now(),
@@ -41,6 +42,30 @@ fn app() -> App {
 
 fn press(app: &mut App, code: KeyCode) {
     app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+#[test]
+fn password_change_shortcut_only_runs_from_idle_main_screen() {
+    let mut app = app();
+    let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
+    app.start_add();
+    app.handle_key(key);
+    assert!(!app.change_password_requested);
+    assert!(matches!(app.popup, ActivePopup::AddEntry { .. }));
+    app.popup = ActivePopup::None;
+    let (_sender, receiver) = mpsc::channel();
+    app.pending_action = Some(receiver);
+    app.handle_key(key);
+    assert!(!app.change_password_requested);
+    app.pending_action = None;
+    app.detail = Some(commands::parse_entry("private-detail"));
+    app.handle_key(key);
+    assert!(app.change_password_requested);
+    assert!(app.locked);
+    assert!(app.detail.is_none());
+    app.change_password_requested = false;
+    app.handle_key(key);
+    assert!(!app.change_password_requested);
 }
 
 #[test]
