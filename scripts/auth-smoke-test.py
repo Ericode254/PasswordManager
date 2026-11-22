@@ -108,6 +108,25 @@ with tempfile.TemporaryDirectory(prefix='passtui-auth-smoke-') as temporary:
 
     session = Session(environment)
     session.capture()
+    # Rejected multiline pastes must preserve the draft, and a following paste
+    # must clear the error. A clipboard line ending must never submit the form.
+    session.send('draft')
+    session.send('\x1b[200~first\nsecond\x1b[201~')
+    session.expect(session.redraw(), 'without embedded line breaks')
+    session.send('\x15')
+    session.send('\x1b[200~' + PASSWORD + '\r\n\x1b[201~')
+    output = session.redraw()
+    assert 'withoutembeddedlinebreaks' not in output.replace(' ', ''), output
+    assert not record.exists() and not backend_log.exists()
+    session.send('\r')
+    session.submit(PASSWORD + '\n')
+    session.expect(session.redraw(), 'private-entry-name')
+    session.close('q')
+    # Start fresh for the existing setup validation scenarios.
+    record.unlink()
+    backend_log.unlink()
+    session = Session(environment)
+    session.capture()
     for text, paste in [(PASSWORD.replace('-', ' '), False),
                         (PASSWORD.replace('-', '\u00a0'), True)]:
         session.submit(text) if paste else session.send(text + '\r')
@@ -146,7 +165,7 @@ with tempfile.TemporaryDirectory(prefix='passtui-auth-smoke-') as temporary:
         assert 'Incorrectmasterpassword' in output.replace(' ', ''), output
         assert 'private-entry-name' not in output and not backend_log.exists()
         session.capture(2.1)
-        output = session.expect(session.password(), 'private-entry-name')
+        output = session.expect(session.submit(PASSWORD + '\r\n'), 'private-entry-name')
         assert 'private-entry-name' in output, output
         session.send('\x0c')
         output = session.expect(session.send('\r'), 'Unlock PassTUI')
@@ -258,4 +277,4 @@ with tempfile.TemporaryDirectory(prefix='passtui-auth-smoke-') as temporary:
         assert phrase.encode() not in session.output, 'Unlock input must remain masked'
         session.close('\x1b' if picker else 'q')
 
-    print('PASS: whitespace rejection, password change/verification/cancellation and concurrent sessions, generation/confirmation, masked input, TUI/picker unlock/relock, corrupt-record denial')
+    print('PASS: clipboard line endings and multiline rejection, whitespace rejection, password change/verification/cancellation and concurrent sessions, generation/confirmation, masked input, TUI/picker unlock/relock, corrupt-record denial')

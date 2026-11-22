@@ -4,6 +4,7 @@ fn app() -> App {
     App {
         running: true,
         locked: false,
+        lock_requires_password: false,
         unlock_requested: false,
         change_password_requested: false,
         install_request: None,
@@ -261,6 +262,10 @@ fn idle_lock_clears_drafts_details_and_undo_without_accepting_paste() {
     app.last_activity = Instant::now() - std::time::Duration::from_secs(2);
     app.handle_paste("must not revive the session");
     assert!(app.locked);
+    assert!(
+        !app.lock_requires_password,
+        "Idle clearing permits a valid remembered session"
+    );
     assert!(app.clipboard_session.revoked());
     assert!(app.detail.is_none());
     assert!(app.editor.notes.is_empty());
@@ -292,6 +297,7 @@ fn manual_lock_during_worker_discards_late_decryption_and_blocks_resume_until_do
     app.pending_action = Some(receiver);
     app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
     assert!(app.locked);
+    assert!(app.lock_requires_password);
     press(&mut app, KeyCode::Enter);
     assert!(app.locked);
     sender
@@ -309,6 +315,20 @@ fn manual_lock_during_worker_discards_late_decryption_and_blocks_resume_until_do
     assert!(app.unlock_requested);
     app.resume_authenticated();
     assert!(!app.locked);
+}
+
+#[test]
+fn manual_lock_on_an_idle_privacy_screen_requires_authentication() {
+    let mut app = app();
+    app.config.behavior.idle_lock_seconds = 1;
+    app.last_activity = Instant::now() - std::time::Duration::from_secs(2);
+    app.tick();
+    assert!(app.locked);
+    assert!(!app.lock_requires_password);
+    app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+    assert!(app.lock_requires_password);
+    app.tick();
+    assert!(app.lock_requires_password);
 }
 
 #[test]

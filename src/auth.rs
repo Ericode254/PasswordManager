@@ -15,7 +15,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     event::{self, AppEvent},
-    ui::theme,
+    ui::{startup, theme},
 };
 
 const MAX_BYTES: usize = 1024;
@@ -32,6 +32,7 @@ enum PromptMode {
 pub struct Auth {
     path: PathBuf,
     hash: Option<String>,
+    verified_at: Option<Instant>,
 }
 
 impl Auth {
@@ -61,7 +62,11 @@ impl Auth {
             }
             Err(error) => return Err(error).context("Cannot read master-password record"),
         };
-        Ok(Self { path, hash })
+        Ok(Self {
+            path,
+            hash,
+            verified_at: None,
+        })
     }
 
     fn enroll(&mut self, password: &str, confirmation: &str) -> Result<()> {
@@ -118,12 +123,16 @@ impl Auth {
         drop(file);
         let _ = fs::remove_file(&temporary);
         result?;
+        self.verified_at = None;
         self.hash = Some(hash);
         Ok(())
     }
 
     fn refresh(&mut self) -> Result<()> {
         let current = Self::load_from(self.path.clone())?;
+        if self.hash != current.hash {
+            self.verified_at = None;
+        }
         if self.hash.is_some() && current.hash.is_none() {
             bail!("Master-password record is missing; access denied");
         }
@@ -132,14 +141,19 @@ impl Auth {
     }
 
     pub fn change_password(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<bool> {
+        self.verified_at = None;
         self.refresh()?;
         if self.hash.is_none() {
             bail!("Launch PassTUI to set a master password first.");
         }
-        if !self.prompt_mode(terminal, PromptMode::VerifyCurrent)? {
+        if !self.prompt_mode(terminal, PromptMode::VerifyCurrent, false)? {
             return Ok(false);
         }
-        self.prompt_mode(terminal, PromptMode::Replace)
+        let changed = self.prompt_mode(terminal, PromptMode::Replace, false)?;
+        if changed {
+            self.verified_at = Some(Instant::now());
+        }
+        Ok(changed)
     }
 
     fn verify(&self, password: &str) -> bool {
@@ -155,19 +169,61 @@ impl Auth {
 
     /// Returns false on cancellation. Never exposes store contents before success.
     pub fn prompt(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<bool> {
+        self.prompt_with_welcome(terminal, false)
+    }
+
+    pub fn prompt_startup(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<bool> {
+        self.prompt_with_welcome(terminal, true)
+    }
+
+    fn prompt_with_welcome(
+        &mut self,
+        terminal: &mut ratatui::DefaultTerminal,
+        show_mascot: bool,
+    ) -> Result<bool> {
+        self.verified_at = None;
         self.refresh()?;
         let mode = if self.hash.is_none() {
             PromptMode::Setup
         } else {
             PromptMode::Unlock
         };
-        self.prompt_mode(terminal, mode)
+        let authenticated = self.prompt_mode(terminal, mode, show_mascot)?;
+        if authenticated {
+            self.verified_at = Some(Instant::now());
+        }
+        Ok(authenticated)
+    }
+
+    /// Only automatic privacy screens may reuse this process's authentication.
+    /// Checking/resuming never extends the original deadline or stores a password.
+    fn can_resume(&mut self, seconds: u64, force_password: bool) -> Result<bool> {
+        if force_password {
+            self.verified_at = None;
+        }
+        self.refresh()?;
+        Ok(self
+            .verified_at
+            .is_some_and(|verified| verified.elapsed() < Duration::from_secs(seconds)))
+    }
+
+    pub fn resume(
+        &mut self,
+        terminal: &mut ratatui::DefaultTerminal,
+        seconds: u64,
+        force_password: bool,
+    ) -> Result<bool> {
+        if self.can_resume(seconds, force_password)? {
+            return Ok(true);
+        }
+        self.prompt(terminal)
     }
 
     fn prompt_mode(
         &mut self,
         terminal: &mut ratatui::DefaultTerminal,
         mode: PromptMode,
+        show_mascot: bool,
     ) -> Result<bool> {
         let setup = matches!(mode, PromptMode::Setup | PromptMode::Replace);
         // Reserve the input limit so typing does not leave old allocations behind.
@@ -180,16 +236,27 @@ impl Auth {
         let mut failures = 0u32;
         let mut retry_at = Instant::now();
         let mut generated: Option<Zeroizing<String>> = None;
+        let started = Instant::now();
         loop {
             terminal.draw(|frame| {
                 let area = frame.area();
                 frame.render_widget(Block::default().style(theme::base()), area);
-                let [_, panel, _] = Layout::vertical([
+                // Keep the form usable when there is no room for the mascot.
+                let mascot_height = if show_mascot && area.height >= 22 {
+                    area.height.saturating_sub(17).min(startup::HEIGHT)
+                } else {
+                    0
+                };
+                let [_, mascot, panel, _] = Layout::vertical([
                     Constraint::Fill(1),
+                    Constraint::Length(mascot_height),
                     Constraint::Length(17),
                     Constraint::Fill(1),
                 ])
                 .areas(area);
+                if mascot_height > 0 {
+                    startup::render(frame, mascot, started.elapsed());
+                }
                 let [_, panel, _] = Layout::horizontal([
                     Constraint::Fill(1),
                     Constraint::Length(74),
@@ -387,18 +454,29 @@ impl Auth {
                 },
                 Some(AppEvent::Paste(text)) => {
                     let text = Zeroizing::new(text);
-                    if text.chars().any(char::is_control)
-                        || fields[active].len() + text.len() > MAX_BYTES
-                    {
-                        message = "Paste a single line, at most 1024 bytes.".into();
-                    } else {
-                        fields[active].push_str(&text);
+                    match append_password_paste(&mut fields[active], &text) {
+                        Ok(()) => message.clear(),
+                        Err(error) => message = error.into(),
                     }
                 }
                 _ => {}
             }
         }
     }
+}
+
+fn append_password_paste(field: &mut String, text: &str) -> Result<(), &'static str> {
+    // Copying a line often includes its ending. These characters cannot be part
+    // of a master password; preserve spaces and all other password characters.
+    let password = text.trim_end_matches(['\r', '\n']);
+    if password.chars().any(char::is_control) {
+        return Err("Paste one password without embedded line breaks or control characters.");
+    }
+    if password.len() > MAX_BYTES.saturating_sub(field.len()) {
+        return Err("Password is too long (maximum 1024 bytes). Ctrl+U clears the field.");
+    }
+    field.push_str(password);
+    Ok(())
 }
 
 fn generate_master_password() -> Zeroizing<String> {
@@ -458,6 +536,47 @@ mod tests {
     const STRONG: &str = "orchid-lantern-quartz-voyage-cobalt-finch";
 
     #[test]
+    fn password_paste_accepts_copied_line_endings_without_trimming_spaces() {
+        for ending in ["", "\n", "\r", "\r\n", "\n\n"] {
+            let mut field = String::new();
+            append_password_paste(&mut field, &format!("{STRONG}{ending}")).unwrap();
+            assert_eq!(field, STRONG);
+        }
+        let mut field = String::from("prefix-");
+        append_password_paste(&mut field, " café password \r\n").unwrap();
+        assert_eq!(field, "prefix- café password ");
+    }
+
+    #[test]
+    fn password_paste_rejects_embedded_controls_without_changing_draft() {
+        for paste in [
+            "first\nsecond",
+            "first\r\nsecond\n",
+            "\npassword",
+            "tab\t",
+            "esc\u{1b}",
+            "nul\0",
+        ] {
+            let mut field = String::from("draft");
+            assert!(append_password_paste(&mut field, paste).is_err());
+            assert_eq!(field, "draft");
+        }
+    }
+
+    #[test]
+    fn password_paste_limits_combined_utf8_bytes_after_removing_line_ending() {
+        let mut field = "x".repeat(MAX_BYTES - 2);
+        append_password_paste(&mut field, "é\r\n").unwrap();
+        assert_eq!(field.len(), MAX_BYTES);
+        assert!(append_password_paste(&mut field, "x").is_err());
+        assert!(field.ends_with('é'));
+        assert_eq!(field.len(), MAX_BYTES);
+        let mut empty = String::new();
+        assert!(append_password_paste(&mut empty, &"é".repeat(MAX_BYTES)).is_err());
+        assert!(empty.is_empty());
+    }
+
+    #[test]
     fn generated_master_password_meets_enrollment_requirements() {
         let password = generate_master_password();
         // Some bundled words are themselves hyphenated (for example, "yo-yo").
@@ -485,6 +604,49 @@ mod tests {
             assert!(validate_password(&format!("{separator}{STRONG}")).is_err());
             assert!(validate_password(&format!("{STRONG}{separator}")).is_err());
         }
+    }
+
+    #[test]
+    fn remembered_unlock_expires_without_sliding_and_manual_lock_revokes_it() {
+        let directory =
+            std::env::temp_dir().join(format!("passtui-session-test-{}", rand::random::<u64>()));
+        let path = directory.join("master-password");
+        let mut auth = Auth::load_from(path.clone()).unwrap();
+        auth.enroll(STRONG, STRONG).unwrap();
+        assert!(!auth.can_resume(7200, false).unwrap());
+        auth.verified_at = Some(Instant::now() - Duration::from_secs(7100));
+        let authenticated_at = auth.verified_at;
+        assert!(auth.can_resume(7200, false).unwrap());
+        assert!(auth.can_resume(7200, false).unwrap());
+        assert_eq!(
+            auth.verified_at, authenticated_at,
+            "Resuming must not extend authentication"
+        );
+        assert!(
+            !Auth::load_from(path.clone())
+                .unwrap()
+                .can_resume(7200, false)
+                .unwrap()
+        );
+        auth.verified_at = Some(Instant::now() - Duration::from_secs(7200));
+        assert!(!auth.can_resume(7200, false).unwrap());
+        auth.verified_at = Some(Instant::now());
+        assert!(!auth.can_resume(0, false).unwrap());
+        assert!(!auth.can_resume(7200, true).unwrap());
+        assert!(!auth.can_resume(7200, false).unwrap());
+        auth.verified_at = Some(Instant::now());
+        let mut other = Auth::load_from(path.clone()).unwrap();
+        other.save_password(STRONG, STRONG, true).unwrap();
+        assert!(
+            !auth.can_resume(7200, false).unwrap(),
+            "Even a new hash for the same password revokes other sessions"
+        );
+        auth.verified_at = Some(Instant::now());
+        fs::write(&path, "corrupted").unwrap();
+        assert!(auth.can_resume(7200, false).is_err());
+        fs::remove_file(&path).unwrap();
+        assert!(auth.can_resume(7200, false).is_err());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -585,6 +747,7 @@ mod tests {
         let mut competing = Auth {
             path: path.clone(),
             hash: None,
+            verified_at: None,
         };
         assert!(competing.enroll(STRONG, STRONG).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), saved);

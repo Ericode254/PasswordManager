@@ -7,7 +7,12 @@ use ratatui::layout::{Constraint, Layout};
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     if app.locked {
-        render_locked(frame, app.loading.is_some(), app.lock_outcome.as_deref());
+        render_locked(
+            frame,
+            app.loading.is_some(),
+            app.lock_requires_password,
+            app.lock_outcome.as_deref(),
+        );
         return;
     }
     frame.render_widget(
@@ -44,7 +49,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     popup::render(frame, app);
 }
 
-pub fn render_locked(frame: &mut Frame, pending: bool, outcome: Option<&str>) {
+pub fn render_locked(
+    frame: &mut Frame,
+    pending: bool,
+    requires_password: bool,
+    outcome: Option<&str>,
+) {
     use ratatui::widgets::{Block, Paragraph, Wrap};
     frame.render_widget(
         Block::default().style(crate::ui::theme::base()),
@@ -54,15 +64,21 @@ pub fn render_locked(frame: &mut Frame, pending: bool, outcome: Option<&str>) {
         "Session cleared\n\nDecrypted details, previews and unsaved drafts have been discarded.\nGPG may still be unlocked by its agent.\n\n{}\n{}",
         if pending {
             "Waiting for the background action to finish…"
-        } else {
+        } else if requires_password {
             "Enter unlocks with your master password · q quits"
+        } else {
+            "Enter resumes (password if needed) · Ctrl+L locks now · q quits"
         },
         outcome.unwrap_or("")
     );
     frame.render_widget(
         Paragraph::new(message)
             .wrap(Wrap { trim: false })
-            .block(Block::bordered().title(" PassTUI · Locked ")),
+            .block(Block::bordered().title(if requires_password {
+                " PassTUI · Locked "
+            } else {
+                " PassTUI · Privacy screen "
+            })),
         frame.area(),
     );
 }

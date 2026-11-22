@@ -24,6 +24,7 @@ pub struct ThemeConfig {
 pub struct BehaviorConfig {
     pub auto_clear_clipboard_seconds: u64,
     pub idle_lock_seconds: u64,
+    pub unlock_session_seconds: u64,
     pub default_reveal_passwords: bool,
 }
 
@@ -47,6 +48,7 @@ impl Default for BehaviorConfig {
         Self {
             auto_clear_clipboard_seconds: 45,
             idle_lock_seconds: 300,
+            unlock_session_seconds: 7200,
             default_reveal_passwords: false,
         }
     }
@@ -101,6 +103,10 @@ impl Config {
             config.behavior.auto_clear_clipboard_seconds = 45;
             warnings.push("Clipboard timeout must be 1–86400 seconds; using 45 seconds.");
         }
+        if config.behavior.unlock_session_seconds > 86400 {
+            config.behavior.unlock_session_seconds = 7200;
+            warnings.push("Unlock session must be 0–86400 seconds; using two hours.");
+        }
         if !warnings.is_empty() {
             config.warning = Some(warnings.join(" "));
         }
@@ -134,6 +140,7 @@ mod tests {
         assert_eq!(config.behavior.auto_clear_clipboard_seconds, 45);
         assert_eq!(config.keybindings.copy_password, 'y');
         assert_eq!(config.behavior.idle_lock_seconds, 300);
+        assert_eq!(config.behavior.unlock_session_seconds, 7200);
     }
 
     #[test]
@@ -194,6 +201,31 @@ mod tests {
         assert_eq!(config.behavior.idle_lock_seconds, 0);
         assert_eq!(config.keybindings.copy_password, 'y');
         assert!(config.warning.is_some());
+    }
+
+    #[test]
+    fn unlock_session_defaults_for_existing_configs_and_accepts_explicit_overrides() {
+        assert_eq!(
+            Config::parse("[behavior]\nidle_lock_seconds = 300")
+                .behavior
+                .unlock_session_seconds,
+            7200
+        );
+        assert_eq!(
+            Config::parse("[behavior]\nunlock_session_seconds = 0")
+                .behavior
+                .unlock_session_seconds,
+            0
+        );
+        assert_eq!(
+            Config::parse("[behavior]\nunlock_session_seconds = 3600")
+                .behavior
+                .unlock_session_seconds,
+            3600
+        );
+        let invalid = Config::parse("[behavior]\nunlock_session_seconds = 86401");
+        assert_eq!(invalid.behavior.unlock_session_seconds, 7200);
+        assert!(invalid.warning.is_some());
     }
 
     #[test]
