@@ -111,7 +111,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
     let mut config = config::Config::load();
     ui::theme::configure(&mut config);
     let mut auth = auth::Auth::load()?;
-    if !auth.prompt(terminal)? {
+    if !auth.prompt_startup(terminal)? {
         return Ok(());
     }
     let mut app = App::new();
@@ -134,7 +134,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
         }
         if app.unlock_requested {
             app.unlock_requested = false;
-            if !auth.prompt(terminal)? {
+            if !auth.resume(
+                terminal,
+                app.config.behavior.unlock_session_seconds,
+                app.lock_requires_password,
+            )? {
                 return Ok(());
             }
             app.resume_authenticated();

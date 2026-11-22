@@ -91,8 +91,8 @@ with open(os.environ['INSTALL_LOG'], 'a') as log: log.write('installed\\n')
     assert setup.returncode == 0 and 'already installed' in setup.stdout
     assert (root / 'install-log').read_text() == 'installed\n', 'Existing dependencies must not reinstall'
 
-    def launch(picker=False, timeout=0):
-        (config / 'config.toml').write_text(f'[behavior]\nidle_lock_seconds = {timeout}\n')
+    def launch(picker=False, timeout=0, session_seconds=7200):
+        (config / 'config.toml').write_text(f'[behavior]\nidle_lock_seconds = {timeout}\nunlock_session_seconds = {session_seconds}\n')
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
         process = subprocess.Popen([str(BINARY), *(['--pick'] if picker else [])], stdin=slave, stdout=slave, stderr=slave, env=environment)
@@ -168,9 +168,28 @@ with open(os.environ['INSTALL_LOG'], 'a') as log: log.write('installed\\n')
                 output += capture(0.3)
             assert 'Sessioncleared' in output.replace(' ', ''), output
             assert 'draft-password' not in output
-            send('\r', 0.1)
+            output = send('\r', 0.2)
+            assert 'UnlockPassTUI' not in output.replace(' ', ''), output
+            assert ('PassTUIPick' if picker else 'PasswordStore') in output.replace(' ', ''), output
+            # Explicit locking still demands a password while the grant is valid.
+            send('\x0c', 0.1)
+            output = send('\r', 0.2)
+            assert 'UnlockPassTUI' in output.replace(' ', ''), output
             authenticate(master, capture)
             close('\x1b' if picker else 'q')
         finally:
             if process.poll() is None: process.kill(); process.wait(); os.close(master)
-    print('PASS: automatic OTP setup/return/idempotency, TOTP parameters/stdin/countdown, seed masking, HOTP rejection, late-worker/manual lock, idle lock in TUI and picker')
+    for picker in (False, True):
+        for session_seconds in (0, 2):
+            master, process = launch(picker, timeout=1, session_seconds=session_seconds)
+            try:
+                capture(0.2)
+                authenticate(master, capture)
+                output = capture(2.2)
+                assert 'Sessioncleared' in output.replace(' ', ''), output
+                output = send('\r', 0.2)
+                assert 'UnlockPassTUI' in output.replace(' ', ''), output
+                close('\x1b')
+            finally:
+                if process.poll() is None: process.kill(); process.wait(); os.close(master)
+    print('PASS: OTP workflows, late-worker cleanup, idle resume without password, manual lock, session expiry and disabled reuse in TUI and picker')

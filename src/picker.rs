@@ -36,6 +36,7 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
     let mut query = String::new();
     let mut selected = 0;
     let mut locked = false;
+    let mut lock_requires_password = false;
     let mut last_activity = std::time::Instant::now();
     let mut session = crate::clipboard::ClipboardSession::default();
 
@@ -46,6 +47,7 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         {
             session.revoke();
             locked = true;
+            lock_requires_password = false;
             query.clear();
             input = Default::default();
             message = None;
@@ -80,7 +82,12 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
 
         terminal.draw(|frame| {
             if locked {
-                crate::ui::layout::render_locked(frame, pending.is_some(), None);
+                crate::ui::layout::render_locked(
+                    frame,
+                    pending.is_some(),
+                    lock_requires_password,
+                    None,
+                );
                 return;
             }
             render(
@@ -101,6 +108,7 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         {
             session.revoke();
             locked = true;
+            lock_requires_password = false;
             query.clear();
             input = Default::default();
             message = None;
@@ -123,9 +131,16 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         };
         if locked {
             match key.code {
+                KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    lock_requires_password = true;
+                }
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(()),
                 KeyCode::Enter if pending.is_none() => {
-                    if !auth.prompt(terminal)? {
+                    if !auth.resume(
+                        terminal,
+                        config.behavior.unlock_session_seconds,
+                        lock_requires_password,
+                    )? {
                         return Ok(());
                     }
                     locked = false;
@@ -140,6 +155,7 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         if key.code == KeyCode::Char('l') && key.modifiers.contains(KeyModifiers::CONTROL) {
             session.revoke();
             locked = true;
+            lock_requires_password = true;
             query.clear();
             input = Default::default();
             message = None;

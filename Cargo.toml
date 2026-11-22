@@ -2,6 +2,9 @@
 name = "passtui"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "A keyboard-driven terminal UI for the pass password store"
+repository = "https://github.com/Ericode254/PasswordManager"
 
 [dependencies]
 ratatui = "0.30"

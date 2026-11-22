@@ -63,7 +63,7 @@ jobs:
         run: |
           package="passtui-${RELEASE_TAG}-x86_64-unknown-linux-gnu"
           mkdir -p "dist/$package/scripts"
-          cp target/release/passtui README.md "dist/$package/"
+          cp target/release/passtui README.md LICENSE "dist/$package/"
           cp -R themes assets "dist/$package/"
           cp scripts/browser_setup.py scripts/setup-browser.py scripts/setup-brave.py "dist/$package/scripts/"
           tar -C dist -czf "dist/$package.tar.gz" "$package"

@@ -1,6 +1,7 @@
 pub mod detail;
 pub mod layout;
 pub mod popup;
+pub mod startup;
 pub mod statusbar;
 pub mod theme;
 pub mod tree;

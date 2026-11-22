@@ -151,6 +151,7 @@ enum BackgroundResult {
 pub struct App {
     pub running: bool,
     pub locked: bool,
+    pub lock_requires_password: bool,
     pub unlock_requested: bool,
     pub change_password_requested: bool,
     pub install_request: Option<crate::otp_setup::Plan>,
@@ -222,6 +223,7 @@ impl App {
         Self {
             running: true,
             locked: false,
+            lock_requires_password: false,
             unlock_requested: false,
             change_password_requested: false,
             install_request: None,
@@ -376,11 +378,13 @@ impl App {
         let seconds = self.config.behavior.idle_lock_seconds;
         if !self.locked && seconds > 0 && self.last_activity.elapsed().as_secs() >= seconds {
             self.lock_session();
+            self.lock_requires_password = false;
         }
     }
 
     fn lock_session(&mut self) {
         self.locked = true;
+        self.lock_requires_password = true;
         self.unlock_requested = false;
         self.change_password_requested = false;
         self.install_request = None;
@@ -402,12 +406,13 @@ impl App {
         self.clipboard_expires = None;
     }
 
-    /// Called only after the master-password prompt succeeds.
+    /// Called after authentication or a valid remembered session authorizes resuming.
     pub fn resume_authenticated(&mut self) {
         if self.pending_action.is_some() {
             return;
         }
         self.locked = false;
+        self.lock_requires_password = false;
         self.unlock_requested = false;
         self.last_activity = Instant::now();
         self.clipboard_session = Default::default();
@@ -1196,6 +1201,9 @@ impl App {
         self.check_idle();
         if self.locked {
             match key.code {
+                KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.lock_requires_password = true;
+                }
                 KeyCode::Char('q') if self.pending_action.is_none() => self.running = false,
                 KeyCode::Enter if self.pending_action.is_none() => {
                     self.unlock_requested = true;
